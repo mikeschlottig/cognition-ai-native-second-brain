@@ -25,8 +25,12 @@ interface VaultState {
     setActiveFile: (id: string | null) => void;
   };
 }
-const persistToIDB = async (files: Record<string, FileItem>) => {
-  await set(STORAGE_KEY, files);
+let debounceTimer: ReturnType<typeof setTimeout>;
+const persistToIDB = (files: Record<string, FileItem>) => {
+  clearTimeout(debounceTimer);
+  debounceTimer = setTimeout(async () => {
+    await set(STORAGE_KEY, files);
+  }, 500);
 };
 export const useVaultStore = create<VaultState>()(
   immer((set) => ({
@@ -36,7 +40,7 @@ export const useVaultStore = create<VaultState>()(
     actions: {
       init: async () => {
         const stored = await get<Record<string, FileItem>>(STORAGE_KEY);
-        if (stored) {
+        if (stored && Object.keys(stored).length > 0) {
           set((state) => {
             state.files = stored;
             state.initialized = true;
@@ -44,7 +48,7 @@ export const useVaultStore = create<VaultState>()(
         } else {
           const initialFiles: Record<string, FileItem> = {};
           DEFAULT_FILES.forEach(f => initialFiles[f.id] = f);
-          await persistToIDB(initialFiles);
+          await set(STORAGE_KEY, initialFiles);
           set((state) => {
             state.files = initialFiles;
             state.activeFileId = "welcome-md";
@@ -94,7 +98,6 @@ export const useVaultStore = create<VaultState>()(
         set((state) => {
           delete state.files[id];
           if (state.activeFileId === id) state.activeFileId = null;
-          // Clean up children if it's a folder
           Object.keys(state.files).forEach(key => {
             if (state.files[key].parentId === id) delete state.files[key];
           });

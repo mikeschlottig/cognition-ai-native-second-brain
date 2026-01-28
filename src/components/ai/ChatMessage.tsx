@@ -1,6 +1,5 @@
 import React from 'react';
 import { motion } from 'framer-motion';
-import ReactMarkdown from 'react-markdown';
 import { cn } from '@/lib/utils';
 import { BrainCircuit, User, Terminal } from 'lucide-react';
 import type { Message, ToolCall } from '../../../worker/types';
@@ -15,7 +14,7 @@ export function ChatMessage({ message }: ChatMessageProps) {
       initial={{ opacity: 0, y: 10 }}
       animate={{ opacity: 1, y: 0 }}
       className={cn(
-        "flex w-full gap-3",
+        "flex w-full gap-3 py-4",
         isAssistant ? "justify-start" : "justify-end"
       )}
     >
@@ -29,23 +28,19 @@ export function ChatMessage({ message }: ChatMessageProps) {
         isAssistant ? "items-start" : "items-end"
       )}>
         <div className={cn(
-          "rounded-2xl px-4 py-2.5 text-sm shadow-sm prose prose-sm dark:prose-invert",
-          isAssistant
-            ? "bg-muted/50 text-foreground border border-border/40 rounded-tl-none"
-            : "bg-primary text-primary-foreground rounded-tr-none prose-p:text-primary-foreground prose-headings:text-primary-foreground"
+          "rounded-2xl px-4 py-2.5 text-sm shadow-sm",
+          isAssistant 
+            ? "bg-muted/50 text-foreground border border-border/40 rounded-tl-none" 
+            : "bg-primary text-primary-foreground rounded-tr-none"
         )}>
-          {isAssistant ? (
-            <ReactMarkdown className="leading-relaxed">
-              {message.content}
-            </ReactMarkdown>
-          ) : (
-            <div className="whitespace-pre-wrap">{message.content}</div>
-          )}
+          <div className="whitespace-pre-wrap leading-relaxed">
+            {message.content}
+          </div>
         </div>
         {message.toolCalls && message.toolCalls.length > 0 && (
           <div className="flex flex-wrap gap-2 mt-1">
             {message.toolCalls.map((tc: ToolCall) => (
-              <div
+              <div 
                 key={tc.id}
                 className="flex items-center gap-2 px-2 py-1 rounded-md bg-secondary/50 border border-border/40 text-[10px] text-muted-foreground font-mono"
               >
