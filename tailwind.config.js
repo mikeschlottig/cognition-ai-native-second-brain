@@ -141,6 +141,11 @@ export default {
   				ring: 'hsl(var(--sidebar-ring))'
   			}
   		},
+  		fontFamily: {
+  			mono: ['JetBrains Mono', 'Fira Code', 'monospace'],
+  			sans: ['Inter', 'system-ui', 'sans-serif'],
+  			display: ['Inter', 'system-ui', 'sans-serif'],
+  		},
   		boxShadow: {
   			soft: '0 2px 15px -3px rgba(0, 0, 0, 0.07), 0 10px 20px -2px rgba(0, 0, 0, 0.04)',
   			glow: '0 0 20px -5px rgba(99, 102, 241, 0.4)',
