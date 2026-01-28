@@ -15,10 +15,10 @@ export function MarkdownEditor() {
   const activeFile = activeFileId ? files[activeFileId] : null;
   const [localContent, setLocalContent] = useState('');
   useEffect(() => {
-    if (activeFileId && activeFile?.content !== undefined) {
-      setLocalContent(activeFile.content);
+    if (activeFileId) {
+      setLocalContent(activeFile?.content ?? '');
     }
-  }, [activeFileId, activeFile?.content]);
+  }, [activeFileId]);
   const onChange = useCallback((value: string) => {
     setLocalContent(value);
     if (activeFileId) {
