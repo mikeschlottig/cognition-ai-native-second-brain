@@ -81,7 +81,8 @@ function runSetupCommands() {
     "bun add @uiw/react-codemirror@^4.23.0",
     "bun add @codemirror/lang-markdown@^6.4.0",
     "bun add idb-keyval@^6.2.0",
-    "bun add @uiw/codemirror-theme-github@^4.23.0"
+    "bun add @uiw/codemirror-theme-github@^4.23.0",
+    "bun install @codemirror/language-data"
 ];
     
     if (commands.length === 0) {
