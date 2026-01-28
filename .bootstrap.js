@@ -84,7 +84,8 @@ function runSetupCommands() {
     "bun add @uiw/codemirror-theme-github@^4.23.0",
     "bun install @codemirror/language-data",
     "bun add @codemirror/language-data@^6.1.1",
-    "bun add react-markdown@^9.0.1"
+    "bun add react-markdown@^9.0.1",
+    "bun add flexsearch jszip"
 ];
     
     if (commands.length === 0) {
