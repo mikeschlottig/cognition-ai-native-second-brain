@@ -1,8 +1,9 @@
-import React, { useState } from 'react';
-import { FolderPlus, FilePlus, ChevronRight, ChevronDown, FileText, Folder, Trash2, MoreVertical, Edit2 } from 'lucide-react';
+import React, { useState, useMemo } from 'react';
+import { FolderPlus, FilePlus, ChevronRight, ChevronDown, FileText, Folder, Trash2, MoreVertical, Edit2, Search, X } from 'lucide-react';
 import { useVaultStore } from '@/stores/vaultStore';
 import { cn } from '@/lib/utils';
 import { Button } from '@/components/ui/button';
+import { Input } from '@/components/ui/input';
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from '@/components/ui/dropdown-menu';
 export function FileExplorer() {
   const files = useVaultStore((s) => s.files);
@@ -15,6 +16,14 @@ export function FileExplorer() {
   const [expanded, setExpanded] = useState<Record<string, boolean>>({ root: true });
   const [renamingId, setRenamingId] = useState<string | null>(null);
   const [tempName, setTempName] = useState("");
+  const [searchQuery, setSearchQuery] = useState("");
+  const filteredFiles = useMemo(() => {
+    if (!searchQuery.trim()) return null;
+    const query = searchQuery.toLowerCase();
+    return Object.values(files).filter(f => 
+      f.type === 'file' && (f.name.toLowerCase().includes(query) || f.content?.toLowerCase().includes(query))
+    );
+  }, [files, searchQuery]);
   const toggleExpand = (id: string) => {
     setExpanded((prev) => ({ ...prev, [id]: !prev[id] }));
   };
@@ -35,8 +44,8 @@ export function FileExplorer() {
         <div
           className={cn(
             "group flex items-center gap-2 px-2 py-1.5 text-xs rounded-md cursor-pointer transition-all duration-200",
-            activeFileId === item.id 
-              ? "bg-primary/10 text-primary border-l-2 border-primary rounded-l-none" 
+            activeFileId === item.id
+              ? "bg-primary/10 text-primary border-l-2 border-primary rounded-l-none"
               : "hover:bg-muted/50 text-muted-foreground hover:text-foreground"
           )}
           onClick={() => item.type === 'file' ? setActiveFile(item.id) : toggleExpand(item.id)}
@@ -87,7 +96,7 @@ export function FileExplorer() {
   return (
     <div className="flex flex-col h-full bg-sidebar">
       <div className="p-4 flex items-center justify-between border-b border-border/40">
-        <h2 className="font-bold text-[11px] uppercase tracking-[0.2em] text-muted-foreground">Vault Explorer</h2>
+        <h2 className="font-bold text-[11px] uppercase tracking-[0.2em] text-muted-foreground">My Vault</h2>
         <div className="flex gap-1">
           <Button variant="ghost" size="icon" className="w-7 h-7 hover:bg-primary/10 hover:text-primary" onClick={() => createFile("New Note")}>
             <FilePlus className="w-3.5 h-3.5" />
@@ -97,8 +106,48 @@ export function FileExplorer() {
           </Button>
         </div>
       </div>
+      <div className="px-2 py-2 border-b border-border/20">
+        <div className="relative group">
+          <Search className="absolute left-2.5 top-2.5 w-3.5 h-3.5 text-muted-foreground transition-colors group-focus-within:text-primary" />
+          <Input 
+            placeholder="Search notes..." 
+            value={searchQuery}
+            onChange={(e) => setSearchQuery(e.target.value)}
+            className="h-8 pl-8 pr-8 text-[11px] bg-secondary/30 border-none focus-visible:ring-1 focus-visible:ring-primary/40"
+          />
+          {searchQuery && (
+            <button 
+              onClick={() => setSearchQuery("")}
+              className="absolute right-2 top-2 text-muted-foreground hover:text-foreground"
+            >
+              <X className="w-3.5 h-3.5" />
+            </button>
+          )}
+        </div>
+      </div>
       <div className="flex-1 overflow-y-auto p-2 space-y-1">
-        {renderTree('root')}
+        {filteredFiles ? (
+          <div className="space-y-1">
+            <p className="text-[10px] text-muted-foreground px-2 py-1 uppercase tracking-widest font-bold">Search Results</p>
+            {filteredFiles.length > 0 ? (
+              filteredFiles.map(file => (
+                <div
+                  key={file.id}
+                  onClick={() => setActiveFile(file.id)}
+                  className={cn(
+                    "flex items-center gap-2 px-2 py-2 text-xs rounded-md cursor-pointer transition-colors",
+                    activeFileId === file.id ? "bg-primary/10 text-primary" : "hover:bg-muted/50 text-muted-foreground"
+                  )}
+                >
+                  <FileText className="w-3.5 h-3.5 shrink-0" />
+                  <span className="truncate">{file.name}</span>
+                </div>
+              ))
+            ) : (
+              <p className="text-[10px] text-muted-foreground px-2 py-4 text-center italic">No matches found</p>
+            )}
+          </div>
+        ) : renderTree('root')}
       </div>
     </div>
   );

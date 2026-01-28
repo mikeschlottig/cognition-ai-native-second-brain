@@ -1,6 +1,6 @@
 import { create } from 'zustand';
 import { immer } from 'zustand/middleware/immer';
-import { get, set } from 'idb-keyval';
+import { get, set as idbSet } from 'idb-keyval';
 import { DEFAULT_FILES, STORAGE_KEY } from '@/lib/constants';
 export type FileType = 'file' | 'folder';
 export interface FileItem {
@@ -14,6 +14,7 @@ export interface FileItem {
 interface VaultState {
   files: Record<string, FileItem>;
   activeFileId: string | null;
+  openFileIds: string[];
   initialized: boolean;
   actions: {
     init: () => Promise<void>;
@@ -23,19 +24,21 @@ interface VaultState {
     deleteItem: (id: string) => void;
     renameItem: (id: string, name: string) => void;
     setActiveFile: (id: string | null) => void;
+    closeFile: (id: string) => void;
   };
 }
 let debounceTimer: ReturnType<typeof setTimeout>;
 const persistToIDB = (files: Record<string, FileItem>) => {
   clearTimeout(debounceTimer);
   debounceTimer = setTimeout(async () => {
-    await set(STORAGE_KEY, files);
+    await idbSet(STORAGE_KEY, files);
   }, 500);
 };
 export const useVaultStore = create<VaultState>()(
   immer((set) => ({
     files: {},
     activeFileId: null,
+    openFileIds: [],
     initialized: false,
     actions: {
       init: async () => {
@@ -44,14 +47,21 @@ export const useVaultStore = create<VaultState>()(
           set((state) => {
             state.files = stored;
             state.initialized = true;
+            // Restore open files from the first available file if none set
+            const firstId = Object.keys(stored).find(id => stored[id].type === 'file');
+            if (firstId) {
+              state.activeFileId = firstId;
+              state.openFileIds = [firstId];
+            }
           });
         } else {
           const initialFiles: Record<string, FileItem> = {};
           DEFAULT_FILES.forEach(f => initialFiles[f.id] = f);
-          await set(STORAGE_KEY, initialFiles);
+          await idbSet(STORAGE_KEY, initialFiles);
           set((state) => {
             state.files = initialFiles;
             state.activeFileId = "welcome-md";
+            state.openFileIds = ["welcome-md"];
             state.initialized = true;
           });
         }
@@ -69,6 +79,9 @@ export const useVaultStore = create<VaultState>()(
           };
           state.files[id] = newItem;
           state.activeFileId = id;
+          if (!state.openFileIds.includes(id)) {
+            state.openFileIds.push(id);
+          }
           persistToIDB(state.files);
         });
       },
@@ -97,9 +110,16 @@ export const useVaultStore = create<VaultState>()(
       deleteItem: (id) => {
         set((state) => {
           delete state.files[id];
-          if (state.activeFileId === id) state.activeFileId = null;
+          state.openFileIds = state.openFileIds.filter(oid => oid !== id);
+          if (state.activeFileId === id) {
+            state.activeFileId = state.openFileIds[0] || null;
+          }
+          // Cleanup children
           Object.keys(state.files).forEach(key => {
-            if (state.files[key].parentId === id) delete state.files[key];
+            if (state.files[key].parentId === id) {
+              delete state.files[key];
+              state.openFileIds = state.openFileIds.filter(oid => oid !== key);
+            }
           });
           persistToIDB(state.files);
         });
@@ -116,6 +136,17 @@ export const useVaultStore = create<VaultState>()(
       setActiveFile: (id) => {
         set((state) => {
           state.activeFileId = id;
+          if (id && !state.openFileIds.includes(id)) {
+            state.openFileIds.push(id);
+          }
+        });
+      },
+      closeFile: (id) => {
+        set((state) => {
+          state.openFileIds = state.openFileIds.filter(oid => oid !== id);
+          if (state.activeFileId === id) {
+            state.activeFileId = state.openFileIds[state.openFileIds.length - 1] || null;
+          }
         });
       },
     },
