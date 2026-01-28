@@ -77,18 +77,7 @@ function updateWranglerJsonc() {
 }
 
 function runSetupCommands() {
-    const commands = [
-    "bun add @uiw/react-codemirror@^4.23.0",
-    "bun add @codemirror/lang-markdown@^6.4.0",
-    "bun add idb-keyval@^6.2.0",
-    "bun add @uiw/codemirror-theme-github@^4.23.0",
-    "bun install @codemirror/language-data",
-    "bun add @codemirror/language-data@^6.1.1",
-    "bun add react-markdown@^9.0.1",
-    "bun add flexsearch jszip",
-    "bun add @tailwindcss/typography",
-    "bun add jszip"
-];
+    const commands = [];
     
     if (commands.length === 0) {
         console.log('⊘ No setup commands to run');
