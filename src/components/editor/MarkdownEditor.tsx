@@ -10,6 +10,7 @@ import { EditorTabs } from './EditorTabs';
 import { PreviewPane } from './PreviewPane';
 import { Panel, PanelGroup, PanelResizeHandle } from 'react-resizable-panels';
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger, DropdownMenuLabel, DropdownMenuSeparator } from '@/components/ui/dropdown-menu';
+import { cn } from '@/lib/utils';
 export function MarkdownEditor() {
   const activeFileId = useVaultStore((s) => s.activeFileId);
   const files = useVaultStore((s) => s.files);
@@ -63,23 +64,36 @@ export function MarkdownEditor() {
         <div className="flex items-center gap-2">
           <DropdownMenu>
             <DropdownMenuTrigger asChild>
-              <Button variant="ghost" size="sm" className="h-8 text-[10px] gap-1.5"><History className="w-3.5 h-3.5" />HISTORY</Button>
+              <Button variant="ghost" size="sm" className="h-8 text-[10px] gap-1.5">
+                <History className="w-3.5 h-3.5" />HISTORY
+              </Button>
             </DropdownMenuTrigger>
             <DropdownMenuContent align="end" className="w-64">
               <DropdownMenuLabel className="text-[10px] uppercase tracking-wider">Version Snapshots</DropdownMenuLabel>
               <DropdownMenuSeparator />
-              {activeFile.history?.length ? activeFile.history.map((h, i) => (
-                <DropdownMenuItem key={i} onClick={() => restoreHistory(activeFileId, h.content)} className="flex justify-between items-center text-xs">
-                  <span>{new Date(h.timestamp).toLocaleString()}</span>
-                  <RotateCcw className="w-3 h-3 text-muted-foreground" />
-                </DropdownMenuItem>
-              )).reverse() : <p className="p-2 text-[10px] text-muted-foreground text-center">No snapshots yet</p>}
+              {activeFile.history && activeFile.history.length > 0 ? (
+                [...activeFile.history].reverse().map((h, i) => (
+                  <DropdownMenuItem key={i} onClick={() => restoreHistory(activeFileId, h.content)} className="flex justify-between items-center text-xs">
+                    <span>{new Date(h.timestamp).toLocaleString()}</span>
+                    <RotateCcw className="w-3 h-3 text-muted-foreground" />
+                  </DropdownMenuItem>
+                ))
+              ) : (
+                <p className="p-2 text-[10px] text-muted-foreground text-center">No snapshots yet</p>
+              )}
             </DropdownMenuContent>
           </DropdownMenu>
-          <Button variant="ghost" size="sm" onClick={() => setIsPreviewOpen(!isPreviewOpen)} className={cn("h-8 text-[10px] gap-1.5", isPreviewOpen && "bg-primary/10 text-primary")}>
+          <Button 
+            variant="ghost" 
+            size="sm" 
+            onClick={() => setIsPreviewOpen(!isPreviewOpen)} 
+            className={cn("h-8 text-[10px] gap-1.5", isPreviewOpen && "bg-primary/10 text-primary")}
+          >
             <Eye className="w-3.5 h-3.5" />PREVIEW
           </Button>
-          <Button variant="ghost" size="sm" onClick={handleExport} className="h-8 text-[10px] gap-1.5"><Download className="w-3.5 h-3.5" />EXPORT</Button>
+          <Button variant="ghost" size="sm" onClick={handleExport} className="h-8 text-[10px] gap-1.5">
+            <Download className="w-3.5 h-3.5" />EXPORT
+          </Button>
         </div>
       </div>
       <div className="flex-1 overflow-hidden">
@@ -101,7 +115,9 @@ export function MarkdownEditor() {
           {isPreviewOpen && (
             <>
               <PanelResizeHandle className="w-px bg-border/40 hover:bg-primary/40 transition-colors" />
-              <Panel defaultSize={50}><PreviewPane content={localContent} /></Panel>
+              <Panel defaultSize={50}>
+                <PreviewPane content={localContent} />
+              </Panel>
             </>
           )}
         </PanelGroup>
