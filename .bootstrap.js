@@ -87,7 +87,7 @@ function runSetupCommands() {
     "bun add react-markdown@^9.0.1",
     "bun add flexsearch jszip",
     "bun add @tailwindcss/typography",
-    "bun add jszip"
+    "bun add jszip lucide-react date-fns"
 ];
     
     if (commands.length === 0) {
