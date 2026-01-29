@@ -1,6 +1,6 @@
 import { create } from 'zustand';
 import { immer } from 'zustand/middleware/immer';
-import { get, set as idbSet, del as idbDel } from 'idb-keyval';
+import { get as idbGet, set as idbSet, del as idbDel } from 'idb-keyval';
 import { DEFAULT_FILES, DEFAULT_VAULT_ID, STORAGE_KEY, VAULTS_REGISTRY_KEY } from '@/lib/constants';
 export type FileType = 'file' | 'folder';
 export interface FileHistory {
@@ -66,6 +66,21 @@ interface VaultState {
 const CURRENT_VAULT_DATA_VERSION = 2;
 const CURRENT_REGISTRY_VERSION = 1;
 const vaultKey = (vaultId: string) => `${STORAGE_KEY}${vaultId}`;
+const cloneHistory = (history: unknown): FileHistory[] => {
+  if (!Array.isArray(history)) return [];
+  return history
+    .filter((h: any) => h && typeof h.content === 'string' && typeof h.timestamp === 'number')
+    .map((h: any) => ({ content: h.content, timestamp: h.timestamp }));
+};
+const cloneFileItem = (item: FileItem): FileItem => ({
+  id: item.id,
+  name: item.name,
+  type: item.type,
+  content: item.content ?? '',
+  parentId: item.parentId ?? 'root',
+  updatedAt: item.updatedAt ?? Date.now(),
+  history: Array.isArray(item.history) ? item.history.map((h) => ({ content: h.content, timestamp: h.timestamp })) : [],
+});
 const sanitizeFiles = (files: unknown): Record<string, FileItem> => {
   if (!files || typeof files !== 'object') return {};
   const record = files as Record<string, any>;
@@ -76,19 +91,29 @@ const sanitizeFiles = (files: unknown): Record<string, FileItem> => {
     const itemId = typeof v.id === 'string' ? v.id : id;
     if (id !== itemId) continue;
     const type: FileType = v.type === 'folder' ? 'folder' : 'file';
+    const parentId = typeof v.parentId === 'string' ? v.parentId : 'root';
     out[id] = {
       id,
-      name: typeof v.name === 'string' && v.name.trim() ? v.name : (type === 'file' ? 'Untitled.md' : 'Untitled'),
+      name:
+        typeof v.name === 'string' && v.name.trim()
+          ? v.name
+          : type === 'file'
+            ? 'Untitled.md'
+            : 'Untitled',
       type,
       content: typeof v.content === 'string' ? v.content : '',
-      parentId: typeof v.parentId === 'string' ? v.parentId : 'root',
+      parentId,
       updatedAt: typeof v.updatedAt === 'number' ? v.updatedAt : Date.now(),
-      history: Array.isArray(v.history)
-        ? v.history
-            .filter((h: any) => h && typeof h.content === 'string' && typeof h.timestamp === 'number')
-            .map((h: any) => ({ content: h.content, timestamp: h.timestamp }))
-        : [],
+      history: cloneHistory(v.history),
     };
+  }
+  // If parentId references a missing folder, reset to root to prevent runtime tree issues.
+  for (const id of Object.keys(out)) {
+    const item = out[id];
+    if (!item) continue;
+    if (item.parentId === 'root') continue;
+    if (typeof item.parentId !== 'string') item.parentId = 'root';
+    else if (!out[item.parentId]) item.parentId = 'root';
   }
   return out;
 };
@@ -101,22 +126,17 @@ const createDefaultFilesRecord = (): Record<string, FileItem> => {
 };
 const countFiles = (files: Record<string, FileItem>): number =>
   Object.values(files).reduce((acc, f) => (f.type === 'file' ? acc + 1 : acc), 0);
-const toPlainFilesSnapshot = (draftFiles: Record<string, FileItem>): Record<string, FileItem> => {
-  // Important: build the snapshot synchronously while the immer draft is still valid.
-  // This avoids "Cannot perform 'ownKeys' on a proxy that has been revoked".
+/**
+ * Build a fully detached snapshot. This MUST be called synchronously while an Immer draft is valid
+ * OR with plain Zustand state. Never keep references to the input objects.
+ */
+const toPlainFilesSnapshot = (files: Record<string, FileItem>): Record<string, FileItem> => {
   const snap: Record<string, FileItem> = {};
-  for (const id of Object.keys(draftFiles)) {
-    const f = draftFiles[id];
+  if (!files || typeof files !== 'object') return snap;
+  for (const id of Object.keys(files)) {
+    const f = files[id];
     if (!f) continue;
-    snap[id] = {
-      id: f.id,
-      name: f.name,
-      type: f.type,
-      content: f.content ?? '',
-      parentId: f.parentId ?? 'root',
-      updatedAt: f.updatedAt ?? Date.now(),
-      history: Array.isArray(f.history) ? f.history.map((h) => ({ content: h.content, timestamp: h.timestamp })) : [],
-    };
+    snap[id] = cloneFileItem(f);
   }
   return snap;
 };
@@ -137,6 +157,12 @@ const persistVaultDataDebounced = (vaultId: string, data: VaultDataV2): void => 
     }
   }, 500);
 };
+// Used to prevent race conditions where an older async load overwrites a newer one.
+let loadSeq = 0;
+const nextLoadSeq = () => {
+  loadSeq += 1;
+  return loadSeq;
+};
 export const useVaultStore = create<VaultState>()(
   immer((set, get) => ({
     vaults: [],
@@ -150,8 +176,9 @@ export const useVaultStore = create<VaultState>()(
     actions: {
       init: async () => {
         if (get().initialized) return;
+        const seq = nextLoadSeq();
         try {
-          const rawRegistry = await get<unknown>(VAULTS_REGISTRY_KEY);
+          const rawRegistry = await idbGet<unknown>(VAULTS_REGISTRY_KEY);
           let registry: VaultRegistryV1 | null = null;
           if (
             rawRegistry &&
@@ -162,10 +189,11 @@ export const useVaultStore = create<VaultState>()(
             registry = {
               version: CURRENT_REGISTRY_VERSION,
               currentVaultId: (rawRegistry as any).currentVaultId,
-              vaults: (rawRegistry as any).vaults as VaultMeta[],
+              vaults: Array.isArray((rawRegistry as any).vaults) ? ((rawRegistry as any).vaults as VaultMeta[]) : [],
             };
           }
-          if (!registry || registry.vaults.length === 0) {
+          // Create default vault on first run (or if registry is corrupt/empty)
+          if (!registry || !Array.isArray(registry.vaults) || registry.vaults.length === 0) {
             const now = Date.now();
             const defaultFiles = createDefaultFilesRecord();
             const defaultMeta: VaultMeta = {
@@ -182,17 +210,18 @@ export const useVaultStore = create<VaultState>()(
             };
             const defaultData: VaultDataV2 = {
               version: CURRENT_VAULT_DATA_VERSION,
-              files: defaultFiles,
+              files: toPlainFilesSnapshot(defaultFiles),
               activeFileId: 'welcome-md',
               openFileIds: ['welcome-md'],
               selectedFolderId: 'root',
             };
             await persistRegistry(nextRegistry);
             await persistVaultData(DEFAULT_VAULT_ID, defaultData);
+            if (seq !== loadSeq) return;
             set((state) => {
               state.vaults = nextRegistry.vaults;
               state.currentVaultId = nextRegistry.currentVaultId;
-              state.files = defaultFiles;
+              state.files = defaultData.files;
               state.activeFileId = defaultData.activeFileId;
               state.openFileIds = defaultData.openFileIds;
               state.selectedFolderId = defaultData.selectedFolderId;
@@ -201,9 +230,9 @@ export const useVaultStore = create<VaultState>()(
             });
             return;
           }
-          // Load current vault data
-          const currentId = registry.currentVaultId || registry.vaults[0]?.id || DEFAULT_VAULT_ID;
-          const rawVault = await get<unknown>(vaultKey(currentId));
+          const currentId =
+            registry.currentVaultId || (Array.isArray(registry.vaults) ? registry.vaults[0]?.id : undefined) || DEFAULT_VAULT_ID;
+          const rawVault = await idbGet<unknown>(vaultKey(currentId));
           let vaultData: VaultDataV2 | null = null;
           if (rawVault && typeof rawVault === 'object') {
             const rv = rawVault as any;
@@ -222,29 +251,38 @@ export const useVaultStore = create<VaultState>()(
             const seeded = createDefaultFilesRecord();
             vaultData = {
               version: CURRENT_VAULT_DATA_VERSION,
-              files: seeded,
+              files: toPlainFilesSnapshot(seeded),
               activeFileId: 'welcome-md',
               openFileIds: ['welcome-md'],
               selectedFolderId: 'root',
             };
             await persistVaultData(currentId, vaultData);
           }
-          const activeId = vaultData.activeFileId && vaultData.files[vaultData.activeFileId] ? vaultData.activeFileId : null;
-          const openIds = vaultData.openFileIds.filter((id) => !!vaultData!.files[id]);
+          // Resolve active/open ids against actual files
+          const activeId =
+            vaultData.activeFileId && vaultData.files[vaultData.activeFileId] ? vaultData.activeFileId : null;
+          const openIds = Array.isArray(vaultData.openFileIds)
+            ? vaultData.openFileIds.filter((id) => typeof id === 'string' && !!vaultData!.files[id])
+            : [];
           const firstFileId = Object.keys(vaultData.files).find((id) => vaultData!.files[id]?.type === 'file') || null;
           const resolvedActive = activeId || firstFileId;
           const resolvedOpen = openIds.length > 0 ? openIds : resolvedActive ? [resolvedActive] : [];
           // Update last accessed for current vault
           const now = Date.now();
-          const nextVaults = registry.vaults.map((v) =>
-            v.id === currentId ? { ...v, lastAccessed: now, fileCount: v.fileCount ?? countFiles(vaultData!.files) } : v
-          );
+          const nextVaults = Array.isArray(registry.vaults)
+            ? registry.vaults.map((v) =>
+                v.id === currentId
+                  ? { ...v, lastAccessed: now, fileCount: typeof v.fileCount === 'number' ? v.fileCount : countFiles(vaultData!.files) }
+                  : v
+              )
+            : [];
           const nextRegistry: VaultRegistryV1 = { ...registry, currentVaultId: currentId, vaults: nextVaults };
           await persistRegistry(nextRegistry);
+          if (seq !== loadSeq) return;
           set((state) => {
             state.vaults = nextRegistry.vaults;
             state.currentVaultId = currentId;
-            state.files = vaultData!.files;
+            state.files = toPlainFilesSnapshot(vaultData!.files);
             state.activeFileId = resolvedActive;
             state.openFileIds = resolvedOpen;
             state.selectedFolderId = vaultData!.selectedFolderId ?? 'root';
@@ -253,17 +291,18 @@ export const useVaultStore = create<VaultState>()(
           });
         } catch (err) {
           console.error('Vault initialization failed:', err);
+          if (seq !== loadSeq) return;
           set((state) => {
-            state.initialized = true; // allow UI to render error boundary paths if any
+            state.initialized = true; // allow UI to render
             state.vaultLoading = false;
           });
         }
       },
       createVault: async (name: string, initialFiles?: Record<string, FileItem>) => {
+        const seq = nextLoadSeq();
         try {
           const now = Date.now();
           const newId = crypto.randomUUID();
-          // Files
           const files = sanitizeFiles(initialFiles ?? createDefaultFilesRecord());
           if (Object.keys(files).length === 0) {
             const seeded = createDefaultFilesRecord();
@@ -272,13 +311,12 @@ export const useVaultStore = create<VaultState>()(
           const firstFileId = Object.keys(files).find((id) => files[id]?.type === 'file') || null;
           const data: VaultDataV2 = {
             version: CURRENT_VAULT_DATA_VERSION,
-            files,
+            files: toPlainFilesSnapshot(files),
             activeFileId: firstFileId,
             openFileIds: firstFileId ? [firstFileId] : [],
             selectedFolderId: 'root',
           };
-          // Registry
-          const registryRaw = await get<unknown>(VAULTS_REGISTRY_KEY);
+          const registryRaw = await idbGet<unknown>(VAULTS_REGISTRY_KEY);
           const prevVaults: VaultMeta[] =
             registryRaw && typeof registryRaw === 'object' && Array.isArray((registryRaw as any).vaults)
               ? ((registryRaw as any).vaults as VaultMeta[])
@@ -297,10 +335,11 @@ export const useVaultStore = create<VaultState>()(
           };
           await persistVaultData(newId, data);
           await persistRegistry(nextRegistry);
+          if (seq !== loadSeq) return newId;
           set((state) => {
             state.vaults = nextRegistry.vaults;
             state.currentVaultId = newId;
-            state.files = files;
+            state.files = toPlainFilesSnapshot(data.files);
             state.activeFileId = data.activeFileId;
             state.openFileIds = data.openFileIds;
             state.selectedFolderId = data.selectedFolderId;
@@ -314,7 +353,9 @@ export const useVaultStore = create<VaultState>()(
         }
       },
       switchVault: async (vaultId: string) => {
-        const { currentVaultId, initialized } = get();
+        const seq = nextLoadSeq();
+        const currentVaultId = get().currentVaultId;
+        const initialized = get().initialized;
         if (!initialized) return;
         if (!vaultId || vaultId === currentVaultId) return;
         set((state) => {
@@ -339,8 +380,7 @@ export const useVaultStore = create<VaultState>()(
           console.error('Failed to flush current vault before switching:', err);
         }
         try {
-          // Load target vault data
-          const rawVault = await get<unknown>(vaultKey(vaultId));
+          const rawVault = await idbGet<unknown>(vaultKey(vaultId));
           let vaultData: VaultDataV2 | null = null;
           if (rawVault && typeof rawVault === 'object') {
             const rv = rawVault as any;
@@ -358,20 +398,23 @@ export const useVaultStore = create<VaultState>()(
             const seeded = createDefaultFilesRecord();
             vaultData = {
               version: CURRENT_VAULT_DATA_VERSION,
-              files: seeded,
+              files: toPlainFilesSnapshot(seeded),
               activeFileId: 'welcome-md',
               openFileIds: ['welcome-md'],
               selectedFolderId: 'root',
             };
             await persistVaultData(vaultId, vaultData);
           }
-          const activeId = vaultData.activeFileId && vaultData.files[vaultData.activeFileId] ? vaultData.activeFileId : null;
-          const openIds = vaultData.openFileIds.filter((id) => !!vaultData!.files[id]);
+          const activeId =
+            vaultData.activeFileId && vaultData.files[vaultData.activeFileId] ? vaultData.activeFileId : null;
+          const openIds = Array.isArray(vaultData.openFileIds)
+            ? vaultData.openFileIds.filter((id) => typeof id === 'string' && !!vaultData!.files[id])
+            : [];
           const firstFileId = Object.keys(vaultData.files).find((id) => vaultData!.files[id]?.type === 'file') || null;
           const resolvedActive = activeId || firstFileId;
           const resolvedOpen = openIds.length > 0 ? openIds : resolvedActive ? [resolvedActive] : [];
           // Update registry current + lastAccessed + fileCount
-          const registryRaw = await get<unknown>(VAULTS_REGISTRY_KEY);
+          const registryRaw = await idbGet<unknown>(VAULTS_REGISTRY_KEY);
           const rawVaults: VaultMeta[] =
             registryRaw && typeof registryRaw === 'object' && Array.isArray((registryRaw as any).vaults)
               ? ((registryRaw as any).vaults as VaultMeta[])
@@ -386,10 +429,11 @@ export const useVaultStore = create<VaultState>()(
             vaults: nextVaults,
           };
           await persistRegistry(nextRegistry);
+          if (seq !== loadSeq) return;
           set((state) => {
             state.vaults = nextRegistry.vaults;
             state.currentVaultId = vaultId;
-            state.files = vaultData!.files;
+            state.files = toPlainFilesSnapshot(vaultData!.files);
             state.activeFileId = resolvedActive;
             state.openFileIds = resolvedOpen;
             state.selectedFolderId = vaultData!.selectedFolderId ?? 'root';
@@ -398,6 +442,7 @@ export const useVaultStore = create<VaultState>()(
           });
         } catch (err) {
           console.error('Failed to switch vault:', err);
+          if (seq !== loadSeq) return;
           set((state) => {
             state.vaultLoading = false;
           });
@@ -406,7 +451,7 @@ export const useVaultStore = create<VaultState>()(
       deleteVault: async (vaultId: string) => {
         try {
           if (!vaultId) return;
-          const registryRaw = await get<unknown>(VAULTS_REGISTRY_KEY);
+          const registryRaw = await idbGet<unknown>(VAULTS_REGISTRY_KEY);
           const current = get().currentVaultId;
           const rawVaults: VaultMeta[] =
             registryRaw && typeof registryRaw === 'object' && Array.isArray((registryRaw as any).vaults)
@@ -415,7 +460,6 @@ export const useVaultStore = create<VaultState>()(
           const nextVaults = rawVaults.filter((v) => v.id !== vaultId);
           await idbDel(vaultKey(vaultId));
           if (nextVaults.length === 0) {
-            // Ensure at least one vault exists
             const now = Date.now();
             const defaultFiles = createDefaultFilesRecord();
             const defaultMeta: VaultMeta = {
@@ -432,7 +476,7 @@ export const useVaultStore = create<VaultState>()(
             };
             const defaultData: VaultDataV2 = {
               version: CURRENT_VAULT_DATA_VERSION,
-              files: defaultFiles,
+              files: toPlainFilesSnapshot(defaultFiles),
               activeFileId: 'welcome-md',
               openFileIds: ['welcome-md'],
               selectedFolderId: 'root',
@@ -442,7 +486,7 @@ export const useVaultStore = create<VaultState>()(
             set((state) => {
               state.vaults = nextRegistry.vaults;
               state.currentVaultId = DEFAULT_VAULT_ID;
-              state.files = defaultFiles;
+              state.files = defaultData.files;
               state.activeFileId = defaultData.activeFileId;
               state.openFileIds = defaultData.openFileIds;
               state.selectedFolderId = defaultData.selectedFolderId;
@@ -471,16 +515,16 @@ export const useVaultStore = create<VaultState>()(
       createFile: (name: string, parentId?: string) => {
         const currentVaultId = get().currentVaultId;
         let createdId: string | null = null;
-        let snapshotFiles: Record<string, FileItem> | null = null;
         let snapshotData: VaultDataV2 | null = null;
         let nextFileCount = 0;
         set((state) => {
           const id = crypto.randomUUID();
           createdId = id;
           const pId = parentId || state.selectedFolderId;
+          const finalName = name.endsWith('.md') ? name : `${name}.md`;
           const newItem: FileItem = {
             id,
-            name: name.endsWith('.md') ? name : `${name}.md`,
+            name: finalName,
             type: 'file',
             content: '',
             parentId: pId,
@@ -491,10 +535,10 @@ export const useVaultStore = create<VaultState>()(
           state.activeFileId = id;
           if (!state.openFileIds.includes(id)) state.openFileIds.push(id);
           nextFileCount = countFiles(state.files);
-          snapshotFiles = toPlainFilesSnapshot(state.files);
+          const snapshotFiles = toPlainFilesSnapshot(state.files);
           snapshotData = {
             version: CURRENT_VAULT_DATA_VERSION,
-            files: snapshotFiles!,
+            files: snapshotFiles,
             activeFileId: state.activeFileId,
             openFileIds: [...state.openFileIds],
             selectedFolderId: state.selectedFolderId,
@@ -504,7 +548,7 @@ export const useVaultStore = create<VaultState>()(
         // Update registry metadata (async, non-blocking)
         (async () => {
           try {
-            const regRaw = await get<unknown>(VAULTS_REGISTRY_KEY);
+            const regRaw = await idbGet<unknown>(VAULTS_REGISTRY_KEY);
             if (!regRaw || typeof regRaw !== 'object') return;
             const rr = regRaw as any;
             if (!Array.isArray(rr.vaults)) return;
@@ -514,7 +558,7 @@ export const useVaultStore = create<VaultState>()(
             );
             const nextRegistry: VaultRegistryV1 = {
               version: CURRENT_REGISTRY_VERSION,
-              currentVaultId: currentVaultId,
+              currentVaultId,
               vaults: nextVaults,
             };
             await persistRegistry(nextRegistry);
@@ -565,6 +609,7 @@ export const useVaultStore = create<VaultState>()(
           if (file.content !== content) {
             const history = file.history || [];
             const lastEntry = history[history.length - 1];
+            // Store snapshots roughly every 60s while editing
             if (!lastEntry || Date.now() - lastEntry.timestamp > 60000) {
               history.push({ content: file.content || '', timestamp: Date.now() });
               if (history.length > 5) history.shift();
@@ -619,7 +664,7 @@ export const useVaultStore = create<VaultState>()(
         if (snapshotData) persistVaultDataDebounced(currentVaultId, snapshotData);
         (async () => {
           try {
-            const regRaw = await get<unknown>(VAULTS_REGISTRY_KEY);
+            const regRaw = await idbGet<unknown>(VAULTS_REGISTRY_KEY);
             if (!regRaw || typeof regRaw !== 'object') return;
             const rr = regRaw as any;
             if (!Array.isArray(rr.vaults)) return;
@@ -629,7 +674,7 @@ export const useVaultStore = create<VaultState>()(
             );
             const nextRegistry: VaultRegistryV1 = {
               version: CURRENT_REGISTRY_VERSION,
-              currentVaultId: currentVaultId,
+              currentVaultId,
               vaults: nextVaults,
             };
             await persistRegistry(nextRegistry);
@@ -718,6 +763,7 @@ export const useVaultStore = create<VaultState>()(
         let nextFileCount = 0;
         set((state) => {
           const sanitized = sanitizeFiles(incomingFiles);
+          // Merge sanitized into current vault
           state.files = { ...state.files, ...sanitized };
           // Ensure there's at least one active file
           if (!state.activeFileId) {
@@ -738,7 +784,7 @@ export const useVaultStore = create<VaultState>()(
         if (snapshotData) persistVaultDataDebounced(currentVaultId, snapshotData);
         (async () => {
           try {
-            const regRaw = await get<unknown>(VAULTS_REGISTRY_KEY);
+            const regRaw = await idbGet<unknown>(VAULTS_REGISTRY_KEY);
             if (!regRaw || typeof regRaw !== 'object') return;
             const rr = regRaw as any;
             if (!Array.isArray(rr.vaults)) return;
@@ -748,7 +794,7 @@ export const useVaultStore = create<VaultState>()(
             );
             const nextRegistry: VaultRegistryV1 = {
               version: CURRENT_REGISTRY_VERSION,
-              currentVaultId: currentVaultId,
+              currentVaultId,
               vaults: nextVaults,
             };
             await persistRegistry(nextRegistry);
