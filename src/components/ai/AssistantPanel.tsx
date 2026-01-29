@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
-import { BarChart3, BrainCircuit, Loader2, Search, Send, Trash2 } from 'lucide-react';
+import { BarChart3, BrainCircuit, Loader2, Search, Send, Tags, TextQuote, Trash2 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { ScrollArea } from '@/components/ui/scroll-area';
@@ -17,6 +17,8 @@ import { useVaultStore } from '@/stores/vaultStore';
 import { chatService } from '@/lib/chat';
 import { ChatMessage } from './ChatMessage';
 import { getRelevantContext } from '@/lib/search';
+import { SYSTEM_PROMPTS } from '@/lib/constants';
+import { cn } from '@/lib/utils';
 import type { Message } from '../../../worker/types';
 type ContextNote = { id: string; name: string };
 export function AssistantPanel() {
@@ -49,6 +51,7 @@ export function AssistantPanel() {
     }
     return map;
   }, [files]);
+  const canRunQuickActions = !!activeFile && !isTyping;
   const loadHistory = async () => {
     const res = await chatService.getMessages();
     if (res.success && res.data) setMessages(res.data.messages || []);
@@ -96,7 +99,7 @@ export function AssistantPanel() {
       `RELATED NOTES:`,
       `${relatedContext || ''}`,
       ``,
-      `USER QUESTION: ${userQuery}`,
+      `USER REQUEST: ${userQuery}`,
     ].join('\n');
     const userMsg: Message = { id: crypto.randomUUID(), role: 'user', content: userQuery, timestamp: Date.now() };
     const assistantId = crypto.randomUUID();
@@ -157,8 +160,10 @@ export function AssistantPanel() {
             <div>
               <h2 className="text-sm font-semibold text-foreground">Assistant</h2>
               <div className="flex items-center gap-1.5">
-                <span className="w-1.5 h-1.5 rounded-full bg-green-500" />
-                <p className="text-[10px] text-muted-foreground uppercase tracking-wider">Ready</p>
+                <span className={cn("w-1.5 h-1.5 rounded-full", isTyping ? "bg-primary animate-pulse" : "bg-green-500")} />
+                <p className="text-[10px] text-muted-foreground uppercase tracking-wider">
+                  {isTyping ? 'Working' : 'Ready'}
+                </p>
               </div>
             </div>
           </div>
@@ -169,6 +174,7 @@ export function AssistantPanel() {
               className="h-8 w-8 text-muted-foreground"
               onClick={handleVaultAnalyze}
               title="Analyze Vault"
+              disabled={isTyping}
             >
               <BarChart3 className="w-4 h-4" />
             </Button>
@@ -178,8 +184,46 @@ export function AssistantPanel() {
               className="h-8 w-8 text-muted-foreground"
               onClick={() => setConfirmClearOpen(true)}
               title="Clear chat history"
+              disabled={isTyping && messages.length === 0}
             >
               <Trash2 className="w-4 h-4" />
+            </Button>
+          </div>
+        </div>
+        {/* Quick Actions */}
+        <div className="px-4 py-3 border-b border-border/40 bg-background/30">
+          <div className="flex items-center justify-between gap-3">
+            <div className="text-[10px] uppercase tracking-widest text-muted-foreground">Quick Actions</div>
+            <div className="text-[10px] text-muted-foreground truncate">
+              {activeFile?.name ? `On: ${activeFile.name}` : 'Select a note to enable'}
+            </div>
+          </div>
+          <div className="mt-2 flex items-center gap-2 overflow-x-auto">
+            <Button
+              type="button"
+              variant="secondary"
+              size="sm"
+              className="h-8 text-[11px] gap-2 bg-secondary/40 hover:bg-secondary/60"
+              disabled={!canRunQuickActions}
+              onClick={() => void handleSend(SYSTEM_PROMPTS.SUMMARIZE)}
+              aria-disabled={!canRunQuickActions}
+              title={activeFile ? 'Summarize the active note' : 'Select a note first'}
+            >
+              <TextQuote className="h-4 w-4" />
+              Summarize
+            </Button>
+            <Button
+              type="button"
+              variant="secondary"
+              size="sm"
+              className="h-8 text-[11px] gap-2 bg-secondary/40 hover:bg-secondary/60"
+              disabled={!canRunQuickActions}
+              onClick={() => void handleSend(SYSTEM_PROMPTS.AUTO_TAG)}
+              aria-disabled={!canRunQuickActions}
+              title={activeFile ? 'Generate hashtags for the active note' : 'Select a note first'}
+            >
+              <Tags className="h-4 w-4" />
+              Auto-Tag
             </Button>
           </div>
         </div>
@@ -189,7 +233,7 @@ export function AssistantPanel() {
               <div className="text-center py-10 px-6">
                 <div className="bg-muted/30 rounded-2xl p-6 border border-border/40">
                   <p className="text-sm text-muted-foreground">
-                    Ask me to synthesize, research, or connect your notes.
+                    Ask me to synthesize, research, summarize, or connect your notes.
                   </p>
                 </div>
               </div>
@@ -198,13 +242,11 @@ export function AssistantPanel() {
               <ChatMessage key={msg.id} message={msg} />
             ))}
             {isTyping && (
-              <div className="space-y-2">
+              <div className="space-y-3">
                 <div className="flex flex-wrap items-center gap-2 px-3 py-2 bg-secondary/30 rounded-xl border border-border/40">
                   <div className="flex items-center gap-2">
                     <Search className="w-3 h-3 text-primary animate-pulse" />
-                    <span className="text-[9px] uppercase tracking-tighter text-muted-foreground">
-                      Reading:
-                    </span>
+                    <span className="text-[9px] uppercase tracking-tighter text-muted-foreground">Reading:</span>
                   </div>
                   {contextNotes.length > 0 ? (
                     <div className="flex flex-wrap gap-1.5">
@@ -224,9 +266,19 @@ export function AssistantPanel() {
                     <span className="text-[10px] text-muted-foreground">Vault</span>
                   )}
                 </div>
-                <div className="bg-muted/50 rounded-2xl px-4 py-2 text-sm border border-border/40 flex items-center gap-2">
-                  <Loader2 className="w-3 h-3 animate-spin text-primary" />
-                  <span className="text-xs text-muted-foreground">Synthesizing...</span>
+                <div className="relative overflow-hidden rounded-2xl border border-primary/20 bg-gradient-to-br from-primary/10 via-background/30 to-background/10 px-4 py-3">
+                  <div className="absolute inset-0 opacity-40 [background:radial-gradient(circle_at_30%_20%,rgba(124,58,237,0.35),transparent_60%)]" />
+                  <div className="relative flex items-center gap-3">
+                    <div className="h-9 w-9 rounded-xl bg-primary/15 border border-primary/20 flex items-center justify-center">
+                      <Loader2 className="w-4 h-4 animate-spin text-primary" />
+                    </div>
+                    <div className="min-w-0">
+                      <div className="text-xs font-semibold text-foreground">Synthesizing…</div>
+                      <div className="text-[11px] text-muted-foreground">
+                        Building connections and extracting signal.
+                      </div>
+                    </div>
+                  </div>
                 </div>
               </div>
             )}
@@ -247,6 +299,7 @@ export function AssistantPanel() {
               onChange={(e) => setInput(e.target.value)}
               disabled={isTyping}
               className="pr-10 bg-secondary/30"
+              aria-label="Chat input"
             />
             <Button
               type="submit"

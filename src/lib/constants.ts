@@ -28,8 +28,19 @@ export const SYSTEM_PROMPTS = {
 Your goal is to help users manage their knowledge, research complex topics, and organize their thoughts.
 You have access to the user's current note content for context.
 Be concise, helpful, and use markdown in your responses.`,
-  AUTO_TAG: "Analyze the following note content and suggest 3-5 relevant hashtags. Return only the hashtags.",
-  SUMMARIZE: "Provide a brief, high-level summary of the following note content in 3 bullet points.",
+  AUTO_TAG: [
+    `Generate **3–5** relevant hashtags for the note.`,
+    `Rules:`,
+    `- Return **ONLY** space-separated hashtags (markdown-friendly), e.g. "#productivity #knowledge-management"`,
+    `- Use lowercase-kebab-case for multiword tags`,
+    `- No bullets, no commas, no extra text`,
+  ].join('\n'),
+  SUMMARIZE: [
+    `Summarize the note as a knowledge artifact.`,
+    `Return:`,
+    `- **Key takeaways**: 3 concise bullet points`,
+    `- **Conceptual connections**: 2 bullets that link the ideas to related concepts or suggested notes (use [[Wiki Links]] when possible)`,
+  ].join('\n'),
   VAULT_ANALYZE:
     "Analyze this vault as a knowledge base. Identify themes, gaps, and the most important next notes to create. Return: (1) Themes (3-6), (2) Missing links, (3) Suggested note titles (5-10).",
 };
