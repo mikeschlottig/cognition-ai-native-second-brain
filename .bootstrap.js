@@ -86,7 +86,8 @@ function runSetupCommands() {
     "bun add @codemirror/language-data@^6.1.1",
     "bun add react-markdown@^9.0.1",
     "bun add flexsearch jszip",
-    "bun add @tailwindcss/typography"
+    "bun add @tailwindcss/typography",
+    "bun add jszip"
 ];
     
     if (commands.length === 0) {
