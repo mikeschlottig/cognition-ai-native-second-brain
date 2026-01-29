@@ -1,6 +1,6 @@
 # Cloudflare AI Chat Agent
 
-[cloudflarebutton]
+[![Deploy to Cloudflare](https://deploy.workers.cloudflare.com/button)](https://deploy.workers.cloudflare.com/?url=https://github.com/mikeschlottig/cognition-ai-native-second-brain)
 
 A production-ready, full-stack AI chat application built on Cloudflare Workers. Features persistent chat sessions powered by Durable Objects, AI integration via Cloudflare AI Gateway, tool calling (web search, weather, MCP servers), streaming responses, and a modern React frontend with shadcn/ui.
 
@@ -98,7 +98,7 @@ bun run deploy  # Builds and deploys via Wrangler
 - AI Gateway configured (Workers AI or @cf/meta/* models).
 - `wrangler login` and `wrangler whoami` verified.
 
-[cloudflarebutton]
+[![Deploy to Cloudflare](https://deploy.workers.cloudflare.com/button)](https://deploy.workers.cloudflare.com/?url=https://github.com/mikeschlottig/cognition-ai-native-second-brain)
 
 ## 🔧 Configuration
 
